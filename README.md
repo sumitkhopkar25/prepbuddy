@@ -914,3 +914,10 @@ The MVP is successful if it can:
 ## Final Summary
 
 PrepBuddy helps candidates move from application chaos to focused preparation.
+
+---
+
+## Database Implementation
+
+The initial PostgreSQL database layer is implemented with SQLAlchemy, Alembic, and pgvector.
+See [docs/database.md](docs/database.md) for the schema organization and local setup.
