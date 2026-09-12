@@ -921,3 +921,8 @@ PrepBuddy helps candidates move from application chaos to focused preparation.
 
 The initial PostgreSQL database layer is implemented with SQLAlchemy, Alembic, and pgvector.
 See [docs/database.md](docs/database.md) for the schema organization and local setup.
+
+## Architecture Reference
+
+The finalized MVP architecture, technical stack, processing flows, and design decisions are
+recorded in [docs/architecture.md](docs/architecture.md).
