@@ -34,7 +34,14 @@ or a cluster. PostgreSQL enforces this with a check constraint.
 
 ## Local setup
 
-Copy `.env.example` to `.env`, then start PostgreSQL and apply the migration:
+Set `DATABASE_URL` in the project-root `.env` file (ignored by Git). For the
+local PostgreSQL service, use:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://prepbuddy:prepbuddy@localhost:5432/prepbuddy
+```
+
+From the project root, start PostgreSQL and apply the migration:
 
 ```bash
 docker compose up -d postgres
