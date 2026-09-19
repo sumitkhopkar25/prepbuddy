@@ -1,5 +1,12 @@
 # Architectural decisions
 
+## Local database configuration — 2026-09-19
+
+Require `DATABASE_URL` from environment configuration instead of embedding default
+credentials in Python. Docker Compose reads `POSTGRES_*` values from `.env` and
+publishes PostgreSQL on host loopback only. Keep existing database credentials and
+volumes intact. See [database setup](../docs/database.md).
+
 ## Accepted MVP architecture
 
 Source: [`docs/architecture.md`](../docs/architecture.md), accepted for MVP and dated

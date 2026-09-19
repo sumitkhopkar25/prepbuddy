@@ -1,6 +1,6 @@
 # Project state
 
-Last reviewed: 2026-09-12.
+Last reviewed: 2026-09-19.
 
 ## Present in the repository
 
@@ -12,6 +12,8 @@ Last reviewed: 2026-09-12.
 - Alembic configuration and initial schema migration: `alembic.ini` and `alembic/`.
 - Database metadata tests: `tests/test_database_metadata.py`.
 - Local service configuration: `compose.yaml` and the Git-ignored `.env`.
+- Database credentials are required from environment configuration; Docker's
+  PostgreSQL port is published only on host loopback. See `docs/database.md`.
 
 ## Planned work
 

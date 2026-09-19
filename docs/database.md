@@ -39,7 +39,22 @@ local PostgreSQL service, use:
 
 ```dotenv
 DATABASE_URL=postgresql+psycopg://prepbuddy:prepbuddy@localhost:5432/prepbuddy
+POSTGRES_DB=prepbuddy
+POSTGRES_USER=prepbuddy
+POSTGRES_PASSWORD=prepbuddy
 ```
+
+These are example local development values. The application requires `DATABASE_URL`
+from `.env` or the process environment; there is no credential fallback in source.
+Keep its database name, username, and password consistent with the `POSTGRES_*`
+values used by Docker Compose. URL-encode special characters in URL credentials.
+Docker publishes PostgreSQL only on `127.0.0.1`, so other machines cannot connect
+through the host's network interfaces. The URL's `localhost` only controls where
+the application connects; it does not control where PostgreSQL accepts connections.
+
+The `POSTGRES_*` values initialize a new database volume. Changing them does not
+change credentials in an existing database; update the database role separately
+if rotating credentials, preserving the existing volume.
 
 From the project root, start PostgreSQL and apply the migration:
 
@@ -57,4 +72,3 @@ To inspect SQL without connecting to a database:
 ```bash
 alembic upgrade head --sql
 ```
-
