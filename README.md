@@ -926,3 +926,18 @@ See [docs/database.md](docs/database.md) for the schema organization and local s
 
 The finalized MVP architecture, technical stack, processing flows, and design decisions are
 recorded in [docs/architecture.md](docs/architecture.md).
+
+## Backend API
+
+With Python 3.12 or newer, activate a virtual environment and run:
+
+```bash
+python -m pip install -e '.[dev]'
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+`GET /health` returns HTTP 200 with `{"status": "ok"}`. This is a process liveness
+check and does not verify database readiness. The API skeleton requires no `.env`
+or running PostgreSQL instance. `POST /health` returns HTTP 405.
+
+Run the health tests with `python -m pytest -q tests/test_health.py`.

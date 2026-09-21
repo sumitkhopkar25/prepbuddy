@@ -1,5 +1,16 @@
 # Architectural decisions
 
+## Initial API liveness boundary — 2026-09-21
+
+Expose a FastAPI factory and `app.main:app` with `GET /health` returning a fixed
+`{"status": "ok"}` response. This reports process liveness only; database readiness
+requires a separate future design with explicit failure and timeout behavior.
+Application construction and health requests do not initialize database settings
+or sessions. Use base Uvicorn without optional performance/reload extras for this
+minimal runtime. This implements the first API boundary in the
+[accepted backend milestone](../docs/architecture.md#15-mvp-implementation-order).
+See [local API setup](../README.md#backend-api).
+
 ## Local database configuration — 2026-09-19
 
 Require `DATABASE_URL` from environment configuration instead of embedding default
