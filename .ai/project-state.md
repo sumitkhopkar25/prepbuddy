@@ -1,6 +1,6 @@
 # Project state
 
-Last reviewed: 2026-09-19.
+Last reviewed: 2026-09-21.
 
 ## Present in the repository
 
@@ -11,16 +11,37 @@ Last reviewed: 2026-09-19.
 - Database models, configuration, and session support: `app/db/`.
 - Alembic configuration and initial schema migration: `alembic.ini` and `alembic/`.
 - Database metadata tests: `tests/test_database_metadata.py`.
+- FastAPI application factory and ASGI entry point: `app/main.py` (`app.main:app`).
+- Database-independent liveness endpoint: `GET /health` returns `200` with
+  `{"status": "ok"}`; `POST /health` returns `405`. HTTP tests: `tests/test_health.py`.
 - Local service configuration: `compose.yaml` and the Git-ignored `.env`.
 - Database credentials are required from environment configuration; Docker's
   PostgreSQL port is published only on host loopback. See `docs/database.md`.
 
 ## Planned work
 
-The architecture describes the intended FastAPI API, Next.js frontend, background
-processing, and preparation workflows. Their application implementations are not
-present in the inspected tree. Follow the implementation order in
-`docs/architecture.md`, starting with the backend skeleton after the database foundation.
+The minimal API skeleton is implemented. Database readiness checks, broader backend
+configuration, authentication and ownership enforcement, the Next.js frontend,
+background processing, and preparation workflows remain planned. Follow the
+implementation order in `docs/architecture.md` when selecting the next milestone.
+
+## Backend validation — 2026-09-21
+
+Using the existing Python 3.12 virtual environment, installed `.[dev]`, passed the
+2 focused health tests and all 16 tests, and passed `ruff check app tests`,
+`pip check`, and the advisor required-file check. Tests required execution outside
+the restricted sandbox because the HTTP test client stalled inside it. The installed
+Starlette test client emitted two upstream deprecation warnings concerning HTTPX
+and AnyIO; tests still passed.
+
+A temporary loopback Uvicorn server returned GET 200 and POST 405 from a directory
+without `.env`, with `DATABASE_URL` removed. A separate import check confirmed that
+the ASGI entry point does not import database configuration or session modules.
+No live database or migrations were exercised.
+
+Next-plan regeneration was attempted, but network access failed in the sandbox and
+automatic approval review rejected the external repository-context export on retry.
+The existing `.ai/next-step.md` is preserved pending explicit user authorization.
 
 ## Repository support
 
