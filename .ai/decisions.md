@@ -1,5 +1,17 @@
 # Architectural decisions
 
+## Provider-neutral authentication boundary — 2026-09-26
+
+Use an immutable external-subject principal and an asynchronous token-validator
+protocol in `app/identity/`, with FastAPI dependency injection for provider adapters.
+The default validator fails closed. Missing, malformed, and rejected bearer credentials
+return a generic HTTP 401 with `WWW-Authenticate: Bearer`, without exposing credentials.
+`GET /me` demonstrates validated subject resolution only; no local user row is implied.
+`GET /health` remains public and database-independent. Provider selection, user
+persistence, and ownership enforcement remain future work under the
+[identity module boundary](../docs/architecture.md#5-backend-module-boundaries) and
+[security requirements](../docs/architecture.md#12-security-and-privacy).
+
 ## Initial API liveness boundary — 2026-09-21
 
 Expose a FastAPI factory and `app.main:app` with `GET /health` returning a fixed

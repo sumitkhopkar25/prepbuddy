@@ -940,4 +940,11 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 check and does not verify database readiness. The API skeleton requires no `.env`
 or running PostgreSQL instance. `POST /health` returns HTTP 405.
 
-Run the health tests with `python -m pytest -q tests/test_health.py`.
+`GET /me` is a protected identity probe returning only the verified external subject.
+The provider-neutral validator currently rejects all tokens with HTTP 401 and
+`WWW-Authenticate: Bearer`. A real authentication provider remains to be integrated;
+tests inject a fake validator through `get_token_validator`. No database user lookup
+or creation occurs.
+
+Run the identity and health tests with
+`python -m pytest -q tests/test_identity.py tests/test_health.py`.
