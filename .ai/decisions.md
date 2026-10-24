@@ -70,3 +70,33 @@ of Python source. See [advisor setup](../docs/project-advisor.md).
 Use `ADVISOR_MODEL` for advisor model configuration. Keep local configuration in
 `.env` only, with setup documented in [database setup](../docs/database.md) and
 [advisor setup](../docs/project-advisor.md).
+
+## Persistent local identity with lazy database access — 2026-09-28
+
+Superseding the subject-only `/me` probe, resolve the verified subject to the existing
+unique user ownership root. A dedicated session commits new users, rolls back failures,
+and re-queries the winner of a unique-subject creation race. Run synchronous persistence
+after authentication in a FastAPI dependency, deferring database imports until execution.
+Return a detached identity result and sanitize persistence/configuration errors as 503.
+This preserves public liveness isolation and implements the
+[identity boundary](../docs/architecture.md#5-backend-module-boundaries) using the
+[existing schema](../docs/database.md).
+
+## Auth0 user access tokens — 2026-10-05
+
+The user selected Auth0. Keep the provider behind `TokenValidator`; use PyJWT's
+RS256 verification against one configured HTTPS issuer and API audience, with a
+cached JWKS client (five-minute TTL, five-second timeout, 30-second unknown-key
+refresh cooldown). Require exp/iat/iss/aud/sub, reject service-account subjects,
+and return only the verified subject to the existing user resolver. Settings load
+on verification and blocking work runs in a thread, preserving public liveness.
+Invalid credentials return 401; configuration/connectivity failures return 503.
+
+No client secret is needed for API verification. Use Postman's Authorization Code
+with PKCE flow and a separate native Auth0 development client for initial live tests;
+frontend SDK/session integration remains planned. Local JWT checks cannot immediately
+revoke existing access tokens; token expiry bounds that delay. The current subject-only
+user key assumes a single trusted issuer and requires a migration plan before switching
+tenants or accepting multiple issuers. See [Auth0 setup and boundaries](../docs/authentication.md),
+[Auth0 validation guidance](https://auth0.com/docs/secure/tokens/access-tokens/validate-access-tokens),
+and the [accepted identity boundary](../docs/architecture.md#5-backend-module-boundaries).

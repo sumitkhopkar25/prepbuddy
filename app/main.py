@@ -4,8 +4,8 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 
-from app.identity.dependencies import get_current_principal
-from app.identity.service import AuthenticatedPrincipal
+from app.identity.dependencies import get_current_user
+from app.identity.service import LocalUser
 
 
 def create_app() -> FastAPI:
@@ -18,10 +18,10 @@ def create_app() -> FastAPI:
 
     @application.get("/me")
     async def me(
-        principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+        user: Annotated[LocalUser, Depends(get_current_user)],
     ) -> dict[str, str]:
-        """Return the verified external subject without resolving a database user."""
-        return {"subject": principal.subject}
+        """Return the persistent local identity for the verified external subject."""
+        return {"id": user.id, "subject": user.subject}
 
     return application
 

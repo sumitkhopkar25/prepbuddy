@@ -940,11 +940,13 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 check and does not verify database readiness. The API skeleton requires no `.env`
 or running PostgreSQL instance. `POST /health` returns HTTP 405.
 
-`GET /me` is a protected identity probe returning only the verified external subject.
-The provider-neutral validator currently rejects all tokens with HTTP 401 and
-`WWW-Authenticate: Bearer`. A real authentication provider remains to be integrated;
-tests inject a fake validator through `get_token_validator`. No database user lookup
-or creation occurs.
+`GET /me` validates an Auth0 user access token, resolves or creates the local user,
+and returns its UUID and verified external subject. Authentication remains disabled
+(HTTP 401 with `WWW-Authenticate: Bearer`) until `AUTH0_DOMAIN` and `AUTH0_AUDIENCE`
+are configured. The API uses Auth0 public signing keys; no client secret is needed
+for token verification. See [Auth0 setup and live testing](docs/authentication.md)
+for first-time dashboard setup, `.env` settings, and a Postman browser login.
+Successful `/me` requests require PostgreSQL; `/health` remains independent.
 
 Run the identity and health tests with
 `python -m pytest -q tests/test_identity.py tests/test_health.py`.
