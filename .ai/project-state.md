@@ -1,6 +1,6 @@
 # Project state
 
-Last reviewed: 2026-09-26.
+Last reviewed: 2026-10-05.
 
 ## Present in the repository
 
@@ -15,9 +15,12 @@ Last reviewed: 2026-09-26.
 - Database-independent liveness endpoint: `GET /health` returns `200` with
   `{"status": "ok"}`; `POST /health` returns `405`. HTTP tests: `tests/test_health.py`.
 - Provider-neutral immutable authenticated principal and injectable bearer-token validator:
-  `app/identity/`. `GET /me` returns only the verified external subject; the default
-  validator rejects all tokens with HTTP 401 and `WWW-Authenticate: Bearer`.
-  Tests: `tests/test_identity.py`.
+  `app/identity/`. `GET /me` returns the resolved local user UUID and verified external subject; the default
+  validator uses Auth0 when configured and rejects tokens when unconfigured.
+  Invalid credentials return HTTP 401 with `WWW-Authenticate: Bearer`.
+  Tests: `tests/test_identity.py` and `tests/test_auth0.py`.
+- Auth0 RS256 user-access-token verification: `app/identity/auth0.py`; first-time
+  account setup and Postman PKCE testing: `docs/authentication.md`.
 - Local service configuration: `compose.yaml` and the Git-ignored `.env`.
 - Database credentials are required from environment configuration; Docker's
   PostgreSQL port is published only on host loopback. See `docs/database.md`.
@@ -25,8 +28,9 @@ Last reviewed: 2026-09-26.
 ## Planned work
 
 The API skeleton and provider-neutral authentication boundary are implemented.
-External authentication-provider integration, database user resolution/upsert, candidate
-ownership queries, and resource authorization remain planned. Database readiness checks,
+Auth0 backend verification is implemented; live tenant configuration/testing, frontend
+login/session integration, candidate creation and ownership queries, and resource
+authorization remain planned. Database readiness checks,
 broader backend configuration, the Next.js frontend, background processing, and
 preparation workflows also remain planned. Follow the
 implementation order in `docs/architecture.md` when selecting the next milestone.
@@ -76,3 +80,45 @@ Advisor configuration (2026-09-14): `python-dotenv` reads the root `.env`;
 `ADVISOR_MODEL` selects the advisor model; process environment variables and the
 model CLI flag can override local values.
 See [advisor setup](../docs/project-advisor.md).
+
+## Local-user resolution validation — 2026-09-28
+
+Implemented lookup/create in `app/identity/user_service.py` using caller-owned dedicated
+sessions, rollback on database errors, and PostgreSQL unique-subject race recovery.
+Authenticated `/me` accesses persistence lazily in a synchronous dependency and returns
+`id` and `subject`; persistence/configuration failures return a generic 503. The model
+and migration match; no schema changes were needed.
+
+Python 3.12 full suite: 38 passed, one PostgreSQL integration test skipped, two upstream
+deprecation warnings. Ruff, advisor required-file checks, and whitespace checks passed.
+Commands ran outside the sandbox due to its host-mount startup failure. Docker is
+unavailable in this WSL distro; live migration and PostgreSQL validation were not run.
+The integration test uses generated subjects and an outer rollback transaction; enable
+it with `PREPBUDDY_TEST_DATABASE_URL` pointing to an isolated migrated PostgreSQL database.
+Provider integration, candidate creation, and resource authorization remain planned.
+
+Advisor next-plan generation was rejected by automatic approval review because sending
+repository context to the external OpenAI API requires explicit authorization. The
+existing next-step plan is preserved.
+
+## Auth0 adapter validation — 2026-10-05
+
+Auth0 was selected by the user. Added lazy environment configuration, RS256 signature
+verification with PyJWT, exact issuer/API audience checks, required claims and human
+subject validation, cached public keys with refresh cooldown and timeout, and generic
+401/503 responses. Verification runs in a worker thread. Health remains independent
+of provider settings, JWT imports, and database configuration. No persistence changes.
+
+Installed `.[dev]` including `PyJWT[crypto]` in the existing Python 3.12 environment.
+Full suite: 76 passed, one opt-in PostgreSQL test skipped, two existing upstream
+deprecation warnings. Ruff, `pip check`, advisor required-file checks, and
+`git diff --check` passed. Tests ran outside the sandbox because TestClient stalled
+inside it; dependency installation also required network access outside the sandbox.
+The Auth0 tests use generated RSA signatures and mocked HTTP/persistence boundaries.
+No real tenant, live login, or PostgreSQL integration was exercised. The user has not
+yet created an Auth0 tenant; `.env` was left intact. Follow `docs/authentication.md`
+to create the account and perform a real two-user `/me` check.
+
+Advisor regeneration remains deferred after the earlier automatic approval rejection
+of external repository-context export; this turn did not retry that export or replace
+the user's existing `.ai/next-step.md`.

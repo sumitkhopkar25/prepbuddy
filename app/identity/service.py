@@ -23,6 +23,10 @@ class InvalidCredentials(AuthenticationError):
     """Credentials are malformed or could not be verified."""
 
 
+class AuthenticationUnavailable(Exception):
+    """Authentication configuration or verification infrastructure is unavailable."""
+
+
 class TokenValidator(Protocol):
     async def validate(self, token: str) -> AuthenticatedPrincipal:
         """Verify a token or raise InvalidCredentials; never log raw credentials."""
@@ -34,3 +38,11 @@ class UnconfiguredTokenValidator:
 
     async def validate(self, token: str) -> AuthenticatedPrincipal:
         raise InvalidCredentials()
+
+
+@dataclass(frozen=True)
+class LocalUser:
+    """Persistent ownership identity, detached from a database session."""
+
+    id: str
+    subject: str

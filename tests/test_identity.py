@@ -6,8 +6,9 @@ from dataclasses import FrozenInstanceError
 import pytest
 from fastapi.testclient import TestClient
 
+from app.identity import dependencies
 from app.identity.dependencies import get_token_validator
-from app.identity.service import AuthenticatedPrincipal, InvalidCredentials
+from app.identity.service import AuthenticatedPrincipal, InvalidCredentials, LocalUser
 from app.main import create_app
 
 
@@ -19,13 +20,20 @@ class FakeTokenValidator:
 
 
 @pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER"])
-def test_validated_subject(scheme: str) -> None:
+def test_validated_subject(scheme: str, monkeypatch) -> None:
+    def resolve(principal):
+        assert principal.subject == "provider-user-123"
+        return LocalUser("7b9a10ee-f18c-46b2-8bb2-7cd2f25dba00", principal.subject)
+
+    monkeypatch.setattr(dependencies, "resolve_local_user", resolve)
     application = create_app()
     application.dependency_overrides[get_token_validator] = FakeTokenValidator
     with TestClient(application) as client:
         response = client.get("/me", headers={"Authorization": f"{scheme} test-valid-token"})
     assert response.status_code == 200
-    assert response.json() == {"subject": "provider-user-123"}
+    assert response.json() == {
+        "id": "7b9a10ee-f18c-46b2-8bb2-7cd2f25dba00", "subject": "provider-user-123"
+    }
 
 
 @pytest.mark.parametrize(
@@ -33,7 +41,11 @@ def test_validated_subject(scheme: str) -> None:
     [None, "Basic test-valid-token", "nonsense", "Bearer", "Bearer ",
      "Bearer   ", "Bearer test-valid-token extra", "Bearer rejected-secret"],
 )
-def test_authentication_failures(authorization: str | None, caplog) -> None:
+def test_authentication_failures(authorization: str | None, caplog, monkeypatch) -> None:
+    def unexpected_resolution(principal):
+        pytest.fail("Unauthenticated requests must not access persistence")
+
+    monkeypatch.setattr(dependencies, "resolve_local_user", unexpected_resolution)
     application = create_app()
     application.dependency_overrides[get_token_validator] = FakeTokenValidator
     headers = {} if authorization is None else {"Authorization": authorization}
@@ -79,6 +91,8 @@ with TestClient(app) as client:
 assert 'app.db.config' not in sys.modules
 assert 'app.db.session' not in sys.modules
 assert 'sqlalchemy' not in sys.modules
+assert 'app.identity.auth0' not in sys.modules
+assert 'jwt' not in sys.modules
 """],
         cwd=tmp_path,
         env=environment,
@@ -86,3 +100,18 @@ assert 'sqlalchemy' not in sys.modules
         capture_output=True,
         text=True,
     )
+
+
+@pytest.mark.parametrize("error", [RuntimeError("private database URL"), OSError("secret SQL")])
+def test_persistence_failure_is_generic(error, monkeypatch, caplog):
+    def fail(principal):
+        raise error
+
+    monkeypatch.setattr(dependencies, "resolve_local_user", fail)
+    application = create_app()
+    application.dependency_overrides[get_token_validator] = FakeTokenValidator
+    with TestClient(application) as client:
+        response = client.get("/me", headers={"Authorization": "Bearer test-valid-token"})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Identity service unavailable"}
+    assert str(error) not in caplog.text
