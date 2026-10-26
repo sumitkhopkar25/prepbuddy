@@ -32,6 +32,27 @@ embeddings. The schema is implemented with SQLAlchemy 2.x and managed by Alembic
 `fit_evaluations` supports exactly one target per row: a target role, an individual job,
 or a cluster. PostgreSQL enforces this with a check constraint.
 
+## Candidate ownership
+
+The MVP allows a user to own zero or one candidate. Each candidate must belong to
+exactly one user through the non-null `candidates.user_id` foreign key to `users.id`.
+The `uq_candidates_user_id` unique constraint enforces the per-user limit, including
+concurrent inserts. A user may exist before candidate onboarding is complete.
+
+The constraint includes soft-deleted records (`deleted_at IS NOT NULL`): retaining
+a deleted candidate does not release its user's slot for another candidate. Updating
+a CV or target direction uses the same candidate; profile history belongs in
+`candidate_profile_versions`, which separately permits only one active version.
+Deletion/restoration API behavior and career-coach access remain planned.
+
+Migration `20261024_0002` adds this constraint after the initial schema. It takes an
+exclusive table lock for the transaction, checks for duplicate owners, and aborts
+with a generic error if any exist, including soft-deleted duplicates. It does not
+delete, merge, or reassign records. Resolve duplicates deliberately before retrying;
+the check does not output user IDs or candidate contents. Downgrading to
+`20260830_0001` removes only the new unique constraint and preserves candidate data
+and the existing ownership index. Keep the initial migration unchanged.
+
 ## Local setup
 
 Set `DATABASE_URL` in the project-root `.env` file (ignored by Git). For the

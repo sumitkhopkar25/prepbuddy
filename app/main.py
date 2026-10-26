@@ -1,9 +1,12 @@
 """ASGI entry point for the PrepBuddy API."""
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, FastAPI
 
+from app.candidates.dependencies import create_owned_candidate
+from app.candidates.schemas import CandidateCreate, CandidateResponse
 from app.identity.dependencies import get_current_user
 from app.identity.service import LocalUser
 
@@ -22,6 +25,14 @@ def create_app() -> FastAPI:
     ) -> dict[str, str]:
         """Return the persistent local identity for the verified external subject."""
         return {"id": user.id, "subject": user.subject}
+
+    @application.post("/candidates", status_code=201, response_model=CandidateResponse)
+    def create_candidate(
+        data: CandidateCreate,
+        user: Annotated[LocalUser, Depends(get_current_user)],
+    ) -> CandidateResponse:
+        """Create the authenticated user's candidate once."""
+        return create_owned_candidate(UUID(user.id), data)
 
     return application
 

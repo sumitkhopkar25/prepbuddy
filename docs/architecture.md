@@ -1,7 +1,7 @@
 # PrepBuddy architecture reference
 
 **Status:** Accepted for MVP  
-**Last updated:** 12 September 2026
+**Last updated:** 24 October 2026
 
 This document records the agreed technical design for PrepBuddy. It is the main reference for
 implementation decisions. Product behavior and examples remain in the project README, while
@@ -91,6 +91,20 @@ The modular monolith is divided by business responsibility:
 
 Maps the external authentication identity to a PrepBuddy user and ensures every query is scoped
 to that user.
+
+For the MVP, a user owns zero or one candidate, and each candidate belongs to exactly one
+user. Onboarding creates the candidate; later CV uploads and target-role changes reuse it.
+Candidate-profile versions represent history for that person. A required foreign key and
+the `uq_candidates_user_id` unique constraint enforce ownership and the per-user limit,
+including retained soft-deleted candidates. See [candidate ownership](database.md#candidate-ownership).
+
+The implemented `POST /candidates` endpoint returns HTTP 201 for the first successful creation
+and HTTP 409 for an existing candidate, including a concurrent creation that loses the
+uniqueness race. Ownership comes from the authenticated local user. The candidates module
+validates baseline fields and uses a dedicated synchronous database session loaded only
+on the protected request path. It materializes the response before closing the session;
+other persistence/configuration failures become generic HTTP 503 errors. Candidate
+retrieval, listing, and authorization queries for existing resources remain planned.
 
 ### Ingestion
 
