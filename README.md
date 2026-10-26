@@ -66,6 +66,12 @@ Prep Plan
 
 Created from the user's CV and target role direction.
 
+For the MVP, each user account owns at most one candidate: zero before onboarding
+and one after candidate creation. Each candidate belongs to exactly one user.
+Additional CV uploads, profile revisions, and target roles belong to that same
+candidate. Candidate-profile history is stored as versions, with at most one active
+version per candidate. Career-coach workflows remain a future enhancement.
+
 It represents:
 
 - Current role
@@ -651,8 +657,13 @@ Supabase / Neon for PostgreSQL
 
 ### Candidate
 
+The implemented schema uses a required, unique `user_id` referencing `users.id`.
+This limit also includes retained soft-deleted candidate records; see
+[candidate ownership](docs/database.md#candidate-ownership).
+
 ```text
 id
+user_id
 name
 current_role
 experience_years
@@ -948,5 +959,30 @@ for token verification. See [Auth0 setup and live testing](docs/authentication.m
 for first-time dashboard setup, `.env` settings, and a Postman browser login.
 Successful `/me` requests require PostgreSQL; `/health` remains independent.
 
+`POST /candidates` creates the authenticated user's candidate and returns HTTP 201
+with `id`, `user_id`, `name`, `current_role`, and `experience_years`. Apply
+`alembic upgrade head` before using it. Supply the Auth0 access token as
+`Authorization: Bearer YOUR_ACCESS_TOKEN` and a JSON body, for example:
+
+```json
+{"name": "Example Candidate", "current_role": "Backend Engineer", "experience_years": 6.5}
+```
+
+All three input fields are optional or nullable; `{}` creates an empty baseline.
+Text is trimmed and must contain 1–200 characters when supplied. Experience must
+be between 0 and 999.9 with at most one decimal place; responses serialize it as
+a decimal string with one decimal place (for example, `"6.5"`), or `null`.
+Unknown fields, including client-supplied `user_id`, are rejected with HTTP 422.
+Ownership always comes from the authenticated local user.
+
+A second creation returns HTTP 409 with `{"detail": "Candidate already exists"}`,
+including concurrent attempts and retained soft-deleted candidates. Authentication
+failures return the existing 401 Bearer challenge; other candidate persistence or
+configuration failures return a generic 503. Candidate retrieval/listing, CV
+ingestion, and target-role selection remain planned.
+
 Run the identity and health tests with
 `python -m pytest -q tests/test_identity.py tests/test_health.py`.
+Run candidate creation tests with `python -m pytest -q tests/test_candidates.py`.
+PostgreSQL service tests are opt-in through `PREPBUDDY_TEST_DATABASE_URL`, pointing
+to an isolated database with all migrations applied; other tests use mocks.

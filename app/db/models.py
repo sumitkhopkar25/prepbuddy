@@ -74,6 +74,7 @@ class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
+        UniqueConstraint("user_id"),
         CheckConstraint(
             "experience_years IS NULL OR experience_years >= 0",
             name="experience_years_non_negative",

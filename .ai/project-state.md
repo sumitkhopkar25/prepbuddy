@@ -1,6 +1,6 @@
 # Project state
 
-Last reviewed: 2026-10-05.
+Last reviewed: 2026-10-24.
 
 ## Present in the repository
 
@@ -10,7 +10,14 @@ Last reviewed: 2026-10-05.
 - Python package and dependencies: `app/` and `pyproject.toml`.
 - Database models, configuration, and session support: `app/db/`.
 - Alembic configuration and initial schema migration: `alembic.ini` and `alembic/`.
+- One-candidate-per-user schema rule: `Candidate` has the
+  `uq_candidates_user_id` unique constraint; migration `20261024_0002` adds it
+  without changing the initial migration or deleting existing records. Users
+  may exist before onboarding. The limit includes retained soft-deleted candidates.
+  See `docs/database.md#candidate-ownership`.
 - Database metadata tests: `tests/test_database_metadata.py`.
+- Candidate ownership checks: `tests/test_candidate_ownership.py`, including
+  functional constraint checks and opt-in PostgreSQL migration tests.
 - FastAPI application factory and ASGI entry point: `app/main.py` (`app.main:app`).
 - Database-independent liveness endpoint: `GET /health` returns `200` with
   `{"status": "ok"}`; `POST /health` returns `405`. HTTP tests: `tests/test_health.py`.
@@ -21,6 +28,12 @@ Last reviewed: 2026-10-05.
   Tests: `tests/test_identity.py` and `tests/test_auth0.py`.
 - Auth0 RS256 user-access-token verification: `app/identity/auth0.py`; first-time
   account setup and Postman PKCE testing: `docs/authentication.md`.
+- Authenticated candidate creation: `POST /candidates` in `app/main.py` and
+  `app/candidates/` returns 201 with a detached response. Ownership comes from
+  `get_current_user`; optional baseline fields are validated, and client-supplied
+  owner IDs/unknown fields are rejected. Only the exact ownership unique violation
+  becomes a generic 409 after rollback; other persistence/configuration failures
+  become generic 503. Synchronous persistence stays lazy. Tests: `tests/test_candidates.py`.
 - Local service configuration: `compose.yaml` and the Git-ignored `.env`.
 - Database credentials are required from environment configuration; Docker's
   PostgreSQL port is published only on host loopback. See `docs/database.md`.
@@ -28,12 +41,89 @@ Last reviewed: 2026-10-05.
 ## Planned work
 
 The API skeleton and provider-neutral authentication boundary are implemented.
-Auth0 backend verification is implemented; live tenant configuration/testing, frontend
-login/session integration, candidate creation and ownership queries, and resource
-authorization remain planned. Database readiness checks,
+Auth0 backend verification and authenticated candidate creation are implemented.
+Live tenant configuration/testing, frontend login/session integration, candidate
+retrieval/listing, ownership queries for existing resources, CV ingestion, profile
+extraction, target-role selection, and resource authorization remain planned.
+Database readiness checks,
 broader backend configuration, the Next.js frontend, background processing, and
 preparation workflows also remain planned. Follow the
 implementation order in `docs/architecture.md` when selecting the next milestone.
+
+## Candidate creation validation — 2026-10-24
+
+Implemented the authenticated creation milestone in `app/candidates/` and
+`app/main.py`. Requests reject unknown fields and owner IDs, trim optional text,
+and validate experience against `NUMERIC(4,1)`. Responses contain UUID strings
+and experience as a one-decimal-place string or null. The synchronous route uses
+a dedicated session, commits successful creation, rolls back database failures,
+and materializes its response before session closure. Only PostgreSQL `23505`
+on `uq_candidates_user_id` becomes a generic 409; other persistence/configuration
+errors become generic 503. No schema or authentication changes were needed.
+
+Using the existing Python 3.12 virtual environment:
+
+- `.venv/bin/python -m pytest -q tests/test_candidates.py tests/test_candidate_ownership.py tests/test_identity.py tests/test_health.py`:
+  54 passed, 7 PostgreSQL checks skipped, two existing upstream warnings.
+- `.venv/bin/python -m pytest -q`: 112 passed, 8 PostgreSQL checks skipped, two
+  existing upstream warnings. Both pytest commands ran outside the sandbox with
+  a 60-second timeout because of the previously confirmed test-client stall.
+- `.venv/bin/ruff check app tests alembic tools`,
+  `.venv/bin/python tools/project_advisor.py check`, advisor `next --dry-run`,
+  and `git diff --check` passed.
+
+Tests cover response data, authenticated ownership, blank/oversized input,
+invalid experience, rejected owner/extra fields, authentication failures,
+generic errors without private details in responses/logs, the exact duplicate
+constraint race path, rollback, and dedicated-session cleanup. The existing
+fresh-process health test confirms that application import and `/health` still
+avoid database, SQLAlchemy, Auth0, and JWT imports without database configuration.
+
+Two new opt-in PostgreSQL service cases cover persisted creation and duplicate
+rejection before/after soft deletion, using generated identities and an outer
+rollback transaction. They were skipped because `PREPBUDDY_TEST_DATABASE_URL`
+is unset. No live database, migration, Auth0 login, or concurrent PostgreSQL test
+was exercised; the race error path was simulated with the exact PostgreSQL error
+metadata. Apply the existing ownership migration before using this API.
+
+README and architecture now describe the implemented API. `.ai/next-step.md` is
+marked complete and preserves the implementation brief. No external advisor
+regeneration was performed; retrieval, existing-resource authorization, CV
+ingestion, extraction, and target-role workflows remain planned.
+
+## Candidate ownership validation — 2026-10-24
+
+Resolved the MVP relationship as zero or one candidate per user, with exactly one
+user per candidate. The SQLAlchemy model and new `20261024_0002` migration enforce
+the limit across retained soft-deleted records too. The migration checks for
+duplicate owners under a table lock and refuses to proceed without changing
+records if duplicates exist. The initial migration is unchanged. README,
+architecture, database guidance, decisions, and `.ai/next-step.md` now agree.
+At that checkpoint candidate creation remained planned: first creation returns 201; duplicate or
+concurrent creation rejected by this unique constraint returns a generic 409.
+
+Using the existing Python 3.12 virtual environment:
+
+- `.venv/bin/python -m pytest -q tests/test_candidate_ownership.py tests/test_database_metadata.py`:
+  6 passed, 5 PostgreSQL migration checks skipped. SQLite functional checks cover
+  accounts before onboarding, independent owners, and duplicate rejection both
+  before and after soft deletion.
+- `.venv/bin/python -m pytest -q`: 79 passed, 6 PostgreSQL checks skipped, two
+  existing upstream deprecation warnings. The sandbox run stalled and was
+  interrupted; the complete suite passed outside the sandbox.
+- `.venv/bin/ruff check app tests alembic tools`, the advisor required-file check,
+  advisor `next --dry-run`, and `git diff --check` passed.
+- Alembic generated PostgreSQL SQL for the full upgrade, the incremental upgrade,
+  and the new migration's downgrade. There is one head, `20261024_0002`.
+
+No live PostgreSQL migration or duplicate-data audit was performed.
+`PREPBUDDY_TEST_DATABASE_URL` is unset, the localhost PostgreSQL probe received no
+response, and Docker is unavailable in this WSL distro. The five new PostgreSQL
+migration tests use a temporary table and rollback, covering upgrade preservation,
+duplicate preflight refusal (including soft-deleted rows), and downgrade behavior.
+They do not migrate an existing application's schema. Apply `alembic upgrade head`
+when the target database is available. The next-step plan was reconciled locally;
+no external advisor regeneration was performed.
 
 ## Identity boundary validation — 2026-09-26
 

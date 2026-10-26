@@ -1,5 +1,50 @@
 # Architectural decisions
 
+## Authenticated candidate creation — 2026-10-24
+
+Implement `POST /candidates` as a synchronous route behind `get_current_user`.
+Only the authenticated local user sets ownership. Accept optional trimmed
+baseline text (1–200 characters) and non-negative experience matching `NUMERIC(4,1)`;
+reject unknown request fields, including owner IDs. Serialize response UUIDs as
+strings and experience as a one-decimal-place string or null. See the
+[API contract](../README.md#backend-api) and
+[identity boundary](../docs/architecture.md#identity).
+
+Keep the `app/candidates` persistence service separate from HTTP error translation.
+Load database imports inside protected execution, use a dedicated caller-owned
+session, and materialize a detached response before closing it. Let the existing
+database constraint enforce the ownership limit, including concurrent attempts:
+roll back and translate only PostgreSQL `23505` on `uq_candidates_user_id` to
+`CandidateAlreadyExists` and generic HTTP 409. Other persistence/configuration
+errors become generic HTTP 503 without exposing or logging exception details.
+Use the [existing ownership migration](../docs/database.md#candidate-ownership);
+this API milestone adds no schema change. Retrieval and resource authorization
+queries remain planned.
+
+## One candidate per user for the MVP — 2026-10-24
+
+A user owns zero or one candidate; each candidate belongs to exactly one user.
+The account exists independently of candidate onboarding. Additional CV uploads,
+target roles, and profile revisions reuse the same candidate. Profile versions
+preserve that person's history. This makes the personal workflow in the
+[product scope](../README.md#1-candidate-profile) explicit under the
+[identity boundary](../docs/architecture.md#identity); career-coach workflows
+remain deferred.
+
+Enforce this in SQLAlchemy and a new Alembic migration with the full
+`uq_candidates_user_id` unique constraint, including retained soft-deleted rows.
+The migration locks the table, rejects existing duplicates without exposing
+identifiers, and preserves all records. Do not modify the initial migration or
+automatically merge/delete candidates. See
+[database ownership and migration behavior](../docs/database.md#candidate-ownership).
+
+The candidate API contract is: the first creation returns 201;
+a second creation returns a generic 409, including concurrent requests rejected
+by this specific constraint. Roll back before translating the conflict. Other
+integrity/persistence failures remain generic 503 errors. Owner identity always
+comes from the authenticated local user. See the
+[updated implementation plan](next-step.md).
+
 ## Provider-neutral authentication boundary — 2026-09-26
 
 Use an immutable external-subject principal and an asynchronous token-validator
