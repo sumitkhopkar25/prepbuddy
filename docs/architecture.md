@@ -1,7 +1,7 @@
 # PrepBuddy architecture reference
 
 **Status:** Accepted for MVP  
-**Last updated:** 24 October 2026
+**Last updated:** 29 October 2026
 
 This document records the agreed technical design for PrepBuddy. It is the main reference for
 implementation decisions. Product behavior and examples remain in the project README, while
@@ -103,8 +103,15 @@ and HTTP 409 for an existing candidate, including a concurrent creation that los
 uniqueness race. Ownership comes from the authenticated local user. The candidates module
 validates baseline fields and uses a dedicated synchronous database session loaded only
 on the protected request path. It materializes the response before closing the session;
-other persistence/configuration failures become generic HTTP 503 errors. Candidate
-retrieval, listing, and authorization queries for existing resources remain planned.
+other persistence/configuration failures become generic HTTP 503 errors.
+
+`GET /candidates/me` retrieves the authenticated user's single candidate by querying
+`Candidate.user_id` with the server-derived local user ID. It returns the existing
+candidate response with HTTP 200 or a generic HTTP 404 when no owned row exists.
+It uses the same lazy dedicated-session and detached-response boundary, with generic
+HTTP 503 errors for unexpected persistence/configuration failures. Retrieval includes
+retained soft-deleted rows as stored; deletion/restoration behavior remains planned.
+Candidate listing and authorization queries for other existing resources remain planned.
 
 ### Ingestion
 

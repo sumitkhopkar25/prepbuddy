@@ -978,11 +978,41 @@ Ownership always comes from the authenticated local user.
 A second creation returns HTTP 409 with `{"detail": "Candidate already exists"}`,
 including concurrent attempts and retained soft-deleted candidates. Authentication
 failures return the existing 401 Bearer challenge; other candidate persistence or
-configuration failures return a generic 503. Candidate retrieval/listing, CV
-ingestion, and target-role selection remain planned.
+configuration failures return a generic 503.
+
+`GET /candidates/me` returns HTTP 200 with the authenticated user's candidate using
+the same response fields and decimal-string format as creation:
+
+```bash
+curl http://127.0.0.1:8000/candidates/me \
+  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN'
+```
+
+The lookup uses only the authenticated local user ID. A user without a candidate
+receives HTTP 404 with `{"detail": "Candidate not found"}`. Missing or invalid
+credentials return HTTP 401 with `WWW-Authenticate: Bearer`; identity resolution
+failures return the existing generic 503. Candidate persistence/configuration
+failures return HTTP 503 with `{"detail": "Candidate service unavailable"}`.
+Retrieval includes the owned row as stored, including retained soft-deleted rows;
+deletion/restoration behavior remains planned. Candidate listing, broader resource
+authorization, CV ingestion, and target-role selection also remain planned.
 
 Run the identity and health tests with
 `python -m pytest -q tests/test_identity.py tests/test_health.py`.
-Run candidate creation tests with `python -m pytest -q tests/test_candidates.py`.
+Run candidate creation and retrieval tests with
+`python -m pytest -q tests/test_candidates.py tests/test_candidate_retrieval.py`.
 PostgreSQL service tests are opt-in through `PREPBUDDY_TEST_DATABASE_URL`, pointing
-to an isolated database with all migrations applied; other tests use mocks.
+to an isolated database with all migrations applied; default tests use mocks and
+in-memory SQLite ownership checks.
+
+For automatic database setup and the complete PostgreSQL/API suite, start Docker
+Desktop (with WSL integration enabled) and run:
+
+```bash
+.venv/bin/python tools/test_postgresql.py
+```
+
+This provisions a disposable pgvector database, applies migrations, runs tests, and
+cleans up. See [automated database testing](docs/database.md#automated-postgresql-and-api-testing)
+for setup, existing-database configuration, and the boundary between the automated
+HTTP flow and live Auth0 login testing.

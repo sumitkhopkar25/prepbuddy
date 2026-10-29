@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI
 
-from app.candidates.dependencies import create_owned_candidate
+from app.candidates.dependencies import create_owned_candidate, get_owned_candidate
 from app.candidates.schemas import CandidateCreate, CandidateResponse
 from app.identity.dependencies import get_current_user
 from app.identity.service import LocalUser
@@ -33,6 +33,13 @@ def create_app() -> FastAPI:
     ) -> CandidateResponse:
         """Create the authenticated user's candidate once."""
         return create_owned_candidate(UUID(user.id), data)
+
+    @application.get("/candidates/me", response_model=CandidateResponse)
+    def current_candidate(
+        user: Annotated[LocalUser, Depends(get_current_user)],
+    ) -> CandidateResponse:
+        """Return the authenticated user's candidate baseline."""
+        return get_owned_candidate(UUID(user.id))
 
     return application
 

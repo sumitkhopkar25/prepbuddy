@@ -1,13 +1,26 @@
-"""Create a candidate using a caller-owned dedicated database session."""
+"""Candidate persistence using caller-owned dedicated database sessions."""
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.candidates import CandidateAlreadyExists
+from app.candidates import CandidateAlreadyExists, CandidateNotFound
 from app.candidates.schemas import CandidateCreate
 from app.db.models import Candidate
+
+
+def get_candidate_for_user(session: Session, user_id: UUID) -> Candidate:
+    """Retrieve the owner's stored row, including retained soft-deleted candidates."""
+    try:
+        candidate = session.scalar(select(Candidate).where(Candidate.user_id == user_id))
+    except SQLAlchemyError:
+        session.rollback()
+        raise
+    if candidate is None:
+        raise CandidateNotFound()
+    return candidate
 
 
 def create_candidate(session: Session, user_id: UUID, data: CandidateCreate) -> Candidate:

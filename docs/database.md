@@ -93,3 +93,62 @@ To inspect SQL without connecting to a database:
 ```bash
 alembic upgrade head --sql
 ```
+
+## Automated PostgreSQL and API testing
+
+With Python development dependencies installed and Docker Desktop running, execute
+from the repository root:
+
+```bash
+.venv/bin/python tools/test_postgresql.py
+```
+
+On Windows/WSL, enable this distro in Docker Desktop under **Settings → Resources →
+WSL Integration**, then apply the change. `docker version` must show both a client
+and a server. See [Docker's WSL instructions](https://docs.docker.com/desktop/features/wsl/).
+
+The runner uses `compose.test.yaml` to start a uniquely named PostgreSQL 16 + pgvector
+container with a generated password, an automatically assigned loopback port, and
+temporary in-memory storage. It waits for readiness, supplies `DATABASE_URL` and
+`PREPBUDDY_TEST_DATABASE_URL` only to its child processes, applies `alembic upgrade
+head`, and runs the full pytest suite. It removes that run's container and network
+on completion or failure. It does not change `.env`, the development Compose
+service, or its database volume. Docker must remain available for cleanup; a
+cleanup failure is reported as a failed run. The first run may download the image.
+
+Pass pytest arguments to select tests, for example:
+
+```bash
+.venv/bin/python tools/test_postgresql.py -q tests/test_api_postgresql.py
+```
+
+`tests/test_api_postgresql.py` starts a real loopback Uvicorn server and exercises
+HTTP authentication, persistent local-user resolution, missing candidate state,
+candidate creation and retrieval, duplicate rejection, input validation, and
+two-user ownership isolation. It verifies committed data through independent
+PostgreSQL sessions and removes only its generated users/candidates afterward.
+JWT signatures and claims use the production validator with generated RSA keys;
+only the Auth0 signing-key HTTP transport is replaced. This checks the implemented
+backend flow, not a real Auth0 browser login or a frontend (which is still planned).
+Use [the live authentication procedure](authentication.md#5-sign-in-and-call-me-from-postman)
+for that external-provider check.
+
+### Using an existing isolated test database
+
+Alternatively, provision a separate PostgreSQL database with pgvector available.
+The migration account must be allowed to create the `vector` extension (or an
+administrator must install it first). Export its URL in your terminal:
+
+```bash
+export PREPBUDDY_TEST_DATABASE_URL='postgresql+psycopg://TEST_USER:TEST_PASSWORD@127.0.0.1:5432/prepbuddy_test'
+DATABASE_URL="$PREPBUDDY_TEST_DATABASE_URL" .venv/bin/python -m alembic upgrade head
+DATABASE_URL="$PREPBUDDY_TEST_DATABASE_URL" .venv/bin/python -m pytest -q
+```
+
+Replace the placeholders locally. The opt-in tests read the process environment;
+adding `PREPBUDDY_TEST_DATABASE_URL` to `.env` alone does not enable them. Without
+the exported variable, normal `python -m pytest -q` skips the PostgreSQL cases.
+Use a database dedicated to automated tests: migrations change its schema and the
+HTTP flow commits generated rows before cleanup. Existing service and constraint
+tests use rollback transactions. The disposable runner handles this configuration
+automatically and is the preferred local command.
