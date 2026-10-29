@@ -4,8 +4,27 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from app.candidates import CandidateAlreadyExists
+from app.candidates import CandidateAlreadyExists, CandidateNotFound
 from app.candidates.schemas import CandidateCreate, CandidateResponse
+
+
+def retrieve_candidate(user_id: UUID) -> CandidateResponse:
+    """Read the owner's candidate and materialize it inside the dedicated session."""
+    from app.candidates.service import get_candidate_for_user
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as session:
+        candidate = get_candidate_for_user(session, user_id)
+        return CandidateResponse.model_validate(candidate)
+
+
+def get_owned_candidate(user_id: UUID) -> CandidateResponse:
+    try:
+        return retrieve_candidate(user_id)
+    except CandidateNotFound:
+        raise HTTPException(status_code=404, detail="Candidate not found") from None
+    except Exception:  # noqa: BLE001 - sanitize persistence and configuration failures
+        raise HTTPException(status_code=503, detail="Candidate service unavailable") from None
 
 
 def persist_candidate(user_id: UUID, data: CandidateCreate) -> CandidateResponse:

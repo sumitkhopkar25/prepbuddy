@@ -1,123 +1,164 @@
 # Next implementation step
 
-Generated: 2026-10-24T08:24:39+00:00 | Model: gpt-5.6-terra
+Status: Completed 2026-10-29. Authenticated current-candidate retrieval is implemented.
+Validation: 127 tests passed; 8 opt-in PostgreSQL tests skipped. See
+[project state](project-state.md#current-candidate-retrieval-validation--2026-10-29)
+for commands and limits. The original implementation brief is preserved below.
 
-Reconciled locally: 2026-10-24. The user approved one candidate per user for the
-MVP. This revision incorporates that decision and the new ownership migration;
-it was not regenerated through the advisor API.
-
-Implementation status: **completed on 2026-10-24**. `POST /candidates`, baseline
-validation, authenticated ownership, duplicate/race handling, and tests are now
-implemented. The tasks below are the completed implementation brief. See
-`.ai/project-state.md` for validation results and remaining work; a new milestone
-has not been generated through the advisor API.
+Generated: 2026-10-26T18:25:01+00:00 | Model: gpt-5.6-terra
 
 ## 1. Current project state
 
-PrepBuddy has a FastAPI application with a database-independent `GET /health` endpoint (`app/main.py`) and an authenticated `GET /me` endpoint that verifies Auth0 RS256 access tokens, resolves/creates a local `users` record, and returns its local UUID plus verified subject (`app/identity/auth0.py`, `app/identity/dependencies.py`, `app/identity/user_service.py`).
+## Implemented
 
-The schema contains the ownership root needed for onboarding: `candidates.user_id` is a required foreign key to `users.id`, with the `uq_candidates_user_id` unique constraint in `app/db/models.py` and migration `alembic/versions/20261024_0002_one_candidate_per_user.py`. A user owns zero or one candidate; optional baseline fields remain nullable. `app/candidates/` and `POST /candidates` now implement authenticated creation. Retrieval/listing and candidate-scoped authorization queries for existing resources remain planned, as recorded in `.ai/project-state.md`.
+- FastAPI exposes database-independent `GET /health`, authenticated `GET /me`, and authenticated `POST /candidates` in `app/main.py`.
+- Auth0 token validation and local-user resolution are implemented under `app/identity/`; `get_current_user` supplies the authenticated local ownership ID.
+- `POST /candidates` already creates one candidate for that user, validates baseline fields, materializes a detached `CandidateResponse`, maps the exact ownership conflict to HTTP 409, and sanitizes other persistence failures as HTTP 503 (`app/candidates/dependencies.py`, `app/candidates/service.py`).
+- The schema enforces one retained candidate per user through `candidates.user_id` and `uq_candidates_user_id` (`app/db/models.py`, `alembic/versions/20261024_0002_one_candidate_per_user.py`).
+- Candidate retrieval/listing and authorization queries for existing resources are explicitly still planned in `.ai/project-state.md` and `docs/architecture.md`.
 
-The original advisory response did not execute tests, migrations, or live Auth0/database checks, and its context omitted the initial migration. The ownership rule and candidate API have since been implemented locally. See `.ai/project-state.md` for actual validation and checks that remain unavailable.
+## Evidence limits and uncertainty
+
+This recommendation is based only on supplied repository content. No tests, migrations, API calls, Auth0 login, or live database inspection were performed for this advisory response. The initial migration was omitted from supplied context because of size, so its exact generated SQL was not independently reviewed; current SQLAlchemy models and the later ownership migration provide the available schema evidence.
+
+The repository records prior validation results in `.ai/project-state.md`, but those results are historical evidence, not validation performed now.
 
 ## 2. Next milestone
 
-Completed milestone: an authenticated **candidate creation endpoint**. The first `POST /candidates` creates a `Candidate` owned by the verified local user and returns HTTP 201 with the new candidate’s identifiers and supplied baseline fields. A second creation returns a generic HTTP 409 Conflict, including a concurrent request rejected by `uq_candidates_user_id`.
+## Add authenticated current-candidate retrieval
 
-This is deliberately limited to creating the ownership root required before CV ingestion, target-role selection, and all candidate-scoped product workflows. Do not add document upload, profile extraction, target roles, a dashboard, or multi-candidate listing in this milestone.
+Implement **`GET /candidates/me`** to return the authenticated user's single candidate baseline record.
+
+Return the existing `CandidateResponse` with HTTP 200 when a candidate owned by the current authenticated user exists. Return a generic HTTP 404, for example `{"detail": "Candidate not found"}`, when that user has not completed candidate onboarding. Scope the lookup by both candidate ownership and authenticated `user_id`; never accept a candidate ID from the client for this milestone.
+
+This is deliberately one small endpoint, not candidate updates, deletion/restoration semantics, candidate listing, CV ingestion, target roles, or general resource lookup.
 
 ## 3. Reasoning
 
-The product’s CV-first workflow cannot begin until an authenticated user has a candidate record to own source documents, profiles, jobs, clusters, and plans. The database model already supports this directly through `Candidate.user_id` (`app/db/models.py`), while `/me` establishes only the `User` identity root (`app/main.py`, `app/identity/user_service.py`).
+`POST /candidates` is complete, but clients cannot currently retrieve the resulting onboarding state. A current-user retrieval endpoint closes that immediate API loop and is the smallest product-facing prerequisite for the next architecture step—CV ingestion and profile work must first locate the authenticated user's candidate ownership root.
 
-A small authenticated write endpoint is higher-value than further authentication planning because it turns identity into a usable product boundary and establishes the ownership link mandated by the architecture’s Identity module (`docs/architecture.md` §§5 and 12). The ownership constraint is now defined in the model and migration; this endpoint milestone needs no further schema changes. `candidates` already includes `name`, `current_role`, and `experience_years`, including a non-negative database constraint. Preserve the current lazy database-import behavior so `/health` stays independent of database configuration, as tested in `tests/test_identity.py`.
+It is also the lowest-risk place to establish the repository's planned existing-resource authorization pattern: query only by the server-derived `LocalUser.id`, return no cross-user result, and sanitize infrastructure errors. The one-candidate-per-user constraint means a singular current-candidate route is clearer and smaller than adding a collection endpoint. Reuse of `CandidateResponse` also keeps response serialization consistent with creation (`app/candidates/schemas.py`).
 
-The ownership ambiguity is resolved: each user owns at most one candidate, including retained soft-deleted records. Further CV uploads, target roles, and profile revisions reuse that candidate. Do not create a fresh candidate for each CV or role. The database constraint protects concurrent requests; an application-only existence check is insufficient. See `README.md` §1 Candidate Profile, `docs/database.md#candidate-ownership`, and the 2026-10-24 decision in `.ai/decisions.md`.
+The proposed behavior should explicitly decide how retained soft-deleted candidates are handled. Because deletion/restoration behavior is documented as planned in `docs/database.md`, the safest small-scope contract is to retrieve the owned row as currently stored rather than introduce a new `deleted_at` filtering policy. If product owners instead require deleted candidates to be hidden, document that as a separate deletion-semantics decision before implementing it.
 
 ## 4. Tasks
 
-1. **Define the candidate API contract and Pydantic request/response models.**
-   - Add a small `app/candidates/` module boundary, for example `schemas.py` and `service.py` (and `__init__.py`).
-   - Define a create request with optional, trimmed `name` and `current_role`, plus optional `experience_years`. Reject blank strings after trimming and reject negative experience before persistence. Keep the accepted fields limited to columns already on `Candidate`; do not accept `user_id`, profile fields, or target roles from the client.
-   - Define a response containing at least `id`, `user_id`, `name`, `current_role`, and `experience_years`. Serialize UUIDs as strings and numeric experience predictably.
-   - Define a generic duplicate response, such as HTTP 409 with `{"detail": "Candidate already exists"}`. Do not expose database exception details.
+1. **Confirm the narrow API contract before coding.**
+   - Route: `GET /candidates/me`.
+   - Authentication: reuse `get_current_user`; missing/invalid credentials must preserve the established HTTP 401 Bearer challenge, and identity resolution failures must preserve its existing HTTP 503 behavior.
+   - Success: HTTP 200 using the existing `CandidateResponse` shape: `id`, `user_id`, `name`, `current_role`, and one-decimal-string-or-null `experience_years`.
+   - No candidate: HTTP 404 with exactly a generic non-sensitive detail such as `Candidate not found`.
+   - Persistence/configuration error: HTTP 503 with a generic candidate-service detail, consistent with creation.
+   - Ownership: derive `user_id` only from `LocalUser`; do not add client-selected IDs or an unscoped candidate lookup.
+   - Soft deletion: do not add deletion behavior or alter the current retained-record invariant in this milestone.
 
-2. **Implement a focused candidate creation service.**
-   - In `app/candidates/service.py`, create a function that accepts a caller-owned SQLAlchemy `Session`, the authenticated local user UUID, and validated create data; instantiate `app.db.models.Candidate` with `user_id` set exclusively from the authenticated user; add, commit, and return the persisted candidate.
-   - On SQLAlchemy persistence errors, roll back. Translate only PostgreSQL unique violations with SQLSTATE `23505` and constraint name `uq_candidates_user_id` into a candidate-already-exists domain error for HTTP 409. This includes concurrent first-creation requests. Other integrity/persistence errors remain generic HTTP 503 failures without leaking database URLs, SQL, or user input.
-   - Follow the established dedicated-session and rollback conventions in `app/identity/user_service.py`. Consume the resolved model and migration without modifying the initial migration or adding another schema change. Retained soft-deleted candidates still occupy the user's slot.
+2. **Add a focused retrieval service in the existing candidates module.**
+   - In `app/candidates/service.py`, add a query function taking a caller-owned SQLAlchemy `Session` and authenticated `UUID` user ID.
+   - Query `Candidate` by `Candidate.user_id == user_id` and return the candidate or a dedicated domain exception such as `CandidateNotFound`.
+   - Do not query by an arbitrary candidate ID, and do not make any schema or Alembic migration change.
+   - Preserve the service convention already used by `create_candidate`: service code handles SQLAlchemy transaction cleanup for SQLAlchemy failures; HTTP translation remains outside the service.
 
-3. **Add lazy candidate persistence wiring and `POST /candidates`.**
-   - Add a candidate-specific dependency/helper that imports `SessionLocal` only when the authenticated endpoint executes, opens/closes a dedicated session, maps the candidate-already-exists error to generic HTTP 409, and converts other persistence/configuration failures to a generic HTTP 503 response such as `{"detail": "Candidate service unavailable"}`.
-   - In `app/main.py`, add `POST /candidates` with HTTP 201. Require `get_current_user`; parse the request model; call the candidate service with `UUID(user.id)`; return the response model.
-   - Ensure the route never trusts a client-provided owner ID and does not expose raw SQLAlchemy exceptions. Preserve `/health`’s current behavior and its lack of database/auth-provider imports before a protected endpoint is invoked.
+3. **Add a lazy dependency/HTTP translation wrapper.**
+   - In `app/candidates/dependencies.py`, add a retrieval helper that imports `SessionLocal` only when an authenticated request executes, opens a dedicated session, calls the service query, and materializes `CandidateResponse` before session closure.
+   - Translate only the intentional not-found domain exception to HTTP 404.
+   - Sanitize all unexpected persistence/configuration failures to HTTP 503 without exposing exception text, connection strings, candidate data, or SQL details.
+   - Preserve public `/health` import isolation: do not import database settings/session modules at `app.main` import time.
 
-4. **Add focused tests before considering broader onboarding.**
-   - Add `tests/test_candidates.py` covering the HTTP happy path with overridden authentication and mocked candidate persistence: a valid authenticated request returns 201, returns the persisted candidate data, and passes the authenticated user ID—not client input—to the service.
-   - Cover relevant failures: unauthenticated `POST /candidates` returns the existing 401 Bearer challenge and does not invoke candidate persistence; invalid negative experience and blank optional strings return 422; a simulated persistence/configuration error returns generic 503 and does not leak its private message.
-   - Add service-level unit tests using a mocked SQLAlchemy `Session`: correct `Candidate.user_id`, `add`/`commit` on success, and `rollback` on `SQLAlchemyError`.
-   - Cover duplicate creation as HTTP 409. Simulate the exact PostgreSQL unique-constraint violation to cover the race path and rollback; unrelated integrity errors must remain HTTP 503. Keep the existing `tests/test_candidate_ownership.py` constraint and migration coverage.
-   - Retain existing health and identity tests to guard lazy-import/liveness behavior.
+4. **Wire the route without changing existing endpoint behavior.**
+   - In `app/main.py`, add `GET /candidates/me` with `response_model=CandidateResponse` and `get_current_user`.
+   - Convert `user.id` to `UUID` exactly as candidate creation currently does.
+   - Keep `POST /candidates`, `/me`, and `/health` unchanged.
 
-5. **Update implementation-state documentation, then validate.**
-   - Update `.ai/project-state.md` to mark authenticated candidate creation as implemented and state that retrieval/listing, candidate authorization queries, CV ingestion, and target-role selection remain planned.
-   - Prerequisites for local checks: Python 3.12+, a virtual environment, and development dependencies installed with `python -m pip install -e '.[dev]'`.
-   - Run:
+5. **Add focused automated tests in `tests/test_candidates.py` (or a new narrowly named candidate-retrieval test module if that keeps the file clearer).**
+   - Use FastAPI dependency overrides/mocks as existing candidate tests do; tests must not require Auth0 or PostgreSQL by default.
+   - Happy path: an authenticated owner receives HTTP 200, the expected serialized candidate response, and the persistence wrapper receives that authenticated owner UUID.
+   - Empty onboarding state: a service-level `CandidateNotFound` produces exactly HTTP 404 and the generic detail.
+   - Ownership boundary: verify a response is returned only from a lookup invoked with the current user's UUID; add a service-level query test demonstrating that querying user A cannot return user B's candidate.
+   - Authentication failure: unauthenticated requests return the existing HTTP 401 Bearer challenge and candidate persistence is not called.
+   - Failure sanitization: simulated session construction and database/query errors return HTTP 503 with the generic message; private error strings do not appear in response text or captured logs.
+   - Lifecycle: confirm the dedicated session context exits and response serialization works after session closure.
+   - If adding an opt-in PostgreSQL test, require `PREPBUDDY_TEST_DATABASE_URL` pointing at an isolated database migrated with `alembic upgrade head`; create two generated users/candidates inside an outer rollback transaction and verify each lookup returns only its owner's row. The test must skip when that variable is unset.
+
+6. **Update implementation-status documentation and validate.**
+   - Update `README.md` Backend API text with the endpoint, status codes, authentication requirement, and an example call only if the exact behavior is implemented.
+   - Update `.ai/project-state.md` to move current-candidate retrieval from planned to implemented and record actual commands/results only after running them.
+   - Update `.ai/decisions.md` only if an enduring policy decision is made (for example, explicit handling of retained soft-deleted candidates); do not add a decision entry merely for routine endpoint wiring.
+   - Prerequisites for local validation: Python 3.12+, an activated virtual environment, and development dependencies installed:
      ```bash
-     python -m pytest -q tests/test_candidates.py tests/test_candidate_ownership.py tests/test_identity.py tests/test_health.py
+     python -m pip install -e '.[dev]'
+     ```
+   - Run focused tests:
+     ```bash
+     python -m pytest -q tests/test_candidates.py tests/test_identity.py tests/test_health.py
+     ```
+     Expected result: all selected non-PostgreSQL tests pass; opt-in PostgreSQL tests, if present and `PREPBUDDY_TEST_DATABASE_URL` is absent, are reported as skipped.
+   - Run the full default suite and static checks:
+     ```bash
      python -m pytest -q
-     ruff check app tests
+     ruff check app tests alembic tools
      python tools/project_advisor.py check
      git diff --check
      ```
-     Expected after implementation: focused and full test commands complete successfully; Ruff reports no violations; advisor check reports required files present; whitespace check emits no errors.
-   - Optional PostgreSQL validation requires an isolated PostgreSQL database with pgvector, `DATABASE_URL`/`PREPBUDDY_TEST_DATABASE_URL` configured, and migrations applied (`docker compose up -d postgres && alembic upgrade head`). Migration `20261024_0002` refuses existing duplicate owners without changing records; resolve any duplicates deliberately before retrying. Add an opt-in service integration test using the isolation pattern in `tests/test_identity_persistence.py`: first creation persists the authenticated owner; a second attempt rolls back and leaves exactly one candidate. The existing migration tests use a temporary table and do not apply migrations to the real schema. A concurrent creation check should observe one success and one conflict. Do not represent PostgreSQL validation as completed unless actually run.
+     Expected result: test suite passes aside from only explicitly opt-in skips; Ruff, advisor required-file check, and whitespace check exit successfully.
+   - Optional real PostgreSQL validation prerequisites: an isolated PostgreSQL database with pgvector support, valid `DATABASE_URL`, `PREPBUDDY_TEST_DATABASE_URL` set to that isolated database, and migrations applied:
+     ```bash
+     alembic upgrade head
+     PREPBUDDY_TEST_DATABASE_URL="$DATABASE_URL" python -m pytest -q tests/test_candidates.py
+     ```
+     Expected result: the opt-in ownership/retrieval persistence cases run and pass without retaining generated test data because the outer transaction rolls back.
 
 ## 5. Relevant files
 
-**Existing files to modify**
-- `app/main.py` — add the narrowly scoped authenticated `POST /candidates` route.
-- `app/db/models.py` — consume the existing `Candidate` model only; no model change is expected.
-- `tests/test_candidate_ownership.py` — retain coverage of the implemented uniqueness rule and migration safeguards.
-- `app/db/session.py` — reuse `SessionLocal` through lazy endpoint execution; avoid eager imports in `app/main.py`.
-- `app/identity/dependencies.py` and `app/identity/service.py` — reuse `get_current_user` and `LocalUser`; change only if a minimal shared dependency extension is genuinely needed.
-- `tests/test_identity.py` and `tests/test_health.py` — keep unchanged unless a regression assertion is necessary.
-- `.ai/project-state.md` — record the new implemented boundary and remaining work.
-- `docs/architecture.md` and `docs/database.md` — reference only; they already define candidate ownership and schema intent.
+## Existing files to modify
 
-**Existing files not expected to change**
-- `alembic/versions/20260830_0001_initial_prepbuddy_schema.py` — preserve the historical initial migration.
-- `alembic/versions/20261024_0002_one_candidate_per_user.py` — ownership constraint migration is already present; apply it before using candidate creation. No further migration is proposed for the API milestone.
-- `app/identity/auth0.py` — token-verification behavior is out of scope.
-- `compose.yaml` — local database setup is already present.
+- `app/main.py` — add the authenticated `GET /candidates/me` route while preserving existing health, identity, and creation routes.
+- `app/candidates/__init__.py` — add a narrowly scoped `CandidateNotFound` domain exception if used.
+- `app/candidates/service.py` — add the user-scoped candidate query using the caller-owned session.
+- `app/candidates/dependencies.py` — add lazy session handling, detached response materialization, and 404/503 translation for retrieval.
+- `tests/test_candidates.py` — extend existing candidate endpoint/service boundary tests, or split only retrieval-specific tests into a focused test file.
+- `README.md` — document the endpoint only after implementation.
+- `.ai/project-state.md` — record the delivered capability and actual validation evidence.
+- `.ai/decisions.md` — modify only if soft-delete retrieval semantics require an explicit persistent decision.
 
-**Proposed new files**
-- `app/candidates/__init__.py` — candidate module package.
-- `app/candidates/schemas.py` — create-request and response Pydantic models.
-- `app/candidates/service.py` — session-owned candidate creation and rollback behavior.
-- `tests/test_candidates.py` — endpoint and service unit tests.
+## Existing files to consult, not expected to change
 
-A separate `app/candidates/dependencies.py` is optional only if it materially clarifies lazy session lifecycle and generic 503 translation; keep the module count minimal.
+- `app/candidates/schemas.py` — reuse `CandidateResponse`; do not duplicate the schema.
+- `app/identity/dependencies.py` and `app/identity/service.py` — preserve authentication and local-user behavior.
+- `app/db/models.py` — `Candidate.user_id` is the ownership root and has a unique constraint.
+- `app/db/session.py` — follow the existing lazy dedicated-session pattern.
+- `tests/test_identity.py` and `tests/test_health.py` — guard current authentication and import-isolation behavior.
+- `docs/architecture.md` and `docs/database.md` — source of planned authorization and retained-candidate constraints.
+
+## Proposed files
+
+- No new production module is required.
+- Optional: `tests/test_candidate_retrieval.py` only if retrieval coverage would make `tests/test_candidates.py` materially unclear; otherwise keep all candidate endpoint coverage in the existing test file.
+- No migration file should be created for this milestone.
 
 ## 6. Coding-agent instructions
 
-Implement only authenticated candidate creation. Preserve all existing files and current `/health`, `/me`, Auth0, and database-session behavior.
+Implement only the authenticated current-candidate retrieval milestone.
 
-Create a compact `app/candidates` business module with validated request/response schemas and a service that takes a caller-owned session. The authenticated owner must come exclusively from `LocalUser.id`; never accept or derive ownership from request JSON. Use the existing `Candidate` ORM table and its `uq_candidates_user_id` constraint. Migration `20261024_0002` implements this approved rule; do not rewrite the initial migration or add another migration for the API. Keep new dependencies, document ingestion, target roles, profile versions, and read/list endpoints out of this milestone.
-
-Keep database imports lazy on the protected execution path so importing `app.main` and calling `/health` without `DATABASE_URL` remains valid. Use dedicated sessions, commit only successful creation, roll back on SQLAlchemy errors, and close sessions. Return generic HTTP 409 only for the exact `23505`/`uq_candidates_user_id` conflict, including concurrent attempts and retained soft-deleted candidates. Sanitize other persistence/configuration failures as 503 without logging/returning raw exception text. Use HTTP 201 for successful first creation, FastAPI/Pydantic validation for malformed baseline fields, and the existing authentication dependency for 401 behavior.
-
-Write focused mocked tests for route ownership, validation, unauthenticated rejection, duplicate/race conflicts, unrelated integrity errors, sanitized persistence failure, and service rollback. Update `.ai/project-state.md` factually after code is complete. Run the specified pytest, Ruff, advisor-check, and whitespace commands; report commands and actual outcomes in the implementation handoff, including any unavailable PostgreSQL/Docker prerequisite. Do not claim live database or migration validation unless it was explicitly performed.
+1. Read `AGENTS.md`, `README.md`, `docs/architecture.md`, `docs/database.md`, and the existing candidate/identity tests before editing.
+2. Add `GET /candidates/me`, protected by the existing `get_current_user` dependency. Do not add a path parameter, list endpoint, candidate update, deletion, target-role behavior, document ingestion, or frontend work.
+3. Implement a candidates-domain query that scopes the database lookup exclusively to the authenticated local user ID. A user with no candidate must receive an intentional domain-level not-found result, not a leaked SQLAlchemy exception.
+4. Reuse `CandidateResponse` and its decimal serializer. Materialize the response while the session is open, then close the session before FastAPI serializes it.
+5. Follow the existing lazy-import pattern in `app/candidates/dependencies.py` so importing `app.main` and calling `/health` still do not initialize database configuration, SQLAlchemy, Auth0, or JWT modules.
+6. Map only the explicit no-candidate condition to generic HTTP 404. Map unexpected database/session/configuration failures to generic HTTP 503, and never include raw exceptions, SQL, database URLs, credentials, or candidate content in responses or logs.
+7. Do not change schema, models, migrations, creation semantics, Auth0 verification, or ownership constraints. Do not invent deletion behavior; retain current stored-row semantics unless the product owner explicitly supplies a contrary requirement.
+8. Add focused tests for successful retrieval, absent candidate, authenticated ownership scoping, unauthenticated short-circuiting, generic 503 sanitation, and dedicated-session closure. Use mocks/default test infrastructure; make any PostgreSQL test opt-in and rollback-safe.
+9. Run the specified focused tests, full tests, Ruff, advisor check, and whitespace check. Report exact commands and outcomes truthfully. If environment limitations prevent a command, state that clearly rather than claiming success.
+10. Preserve existing files and update README/project state only to describe behavior actually implemented and validated.
 
 ## 7. Definition of done
 
-- `POST /candidates` exists in `app/main.py`, requires the established authenticated-user dependency, and returns HTTP 201 for a valid request.
-- A successful response exposes the created candidate ID, authenticated owner ID, and accepted baseline fields, without accepting a request-controlled `user_id`.
-- The persisted `Candidate.user_id` is derived from the verified local user UUID; no candidate is created for an unauthenticated request.
-- The approved one-candidate-per-user rule is respected: a second creation returns a generic HTTP 409 after rollback, including concurrent attempts rejected by `uq_candidates_user_id`. Unrelated integrity errors remain generic HTTP 503. Existing candidate data is preserved.
-- Optional text fields reject whitespace-only values, and negative `experience_years` is rejected with HTTP 422 before persistence.
-- Other database/session/configuration failures on the protected endpoint produce a generic HTTP 503 response and do not expose raw exception details.
-- Candidate creation rolls back its caller-owned session when a SQLAlchemy error occurs.
-- `/health` remains a public 200 liveness endpoint independent of database configuration, and existing `/me` authentication behavior is not intentionally changed.
-- `tests/test_candidates.py` covers the happy path and specified failure cases; focused tests, the full suite, Ruff, `python tools/project_advisor.py check`, and `git diff --check` have been run and their actual results are recorded in `.ai/project-state.md`. Live PostgreSQL/Auth0 checks must be reported separately from mocked checks.
-- `.ai/project-state.md` accurately distinguishes this implemented candidate-creation boundary from still-planned candidate retrieval/authorization, CV ingestion, profile extraction, and target-role workflows.
+- `GET /candidates/me` exists in `app/main.py` and requires the existing authenticated local-user dependency.
+- An authenticated user with a candidate receives HTTP 200 with the existing `CandidateResponse` fields; UUID fields serialize as strings and `experience_years` follows the established one-decimal-string-or-null behavior.
+- An authenticated user without a candidate receives HTTP 404 with the documented generic `Candidate not found` response and no database exception details.
+- The retrieval query is scoped by the authenticated user ID, with automated coverage demonstrating that one user's retrieval cannot return another user's candidate.
+- Missing or invalid credentials remain HTTP 401 with `WWW-Authenticate: Bearer`, and candidate persistence is not invoked.
+- Unexpected session, configuration, and database/query failures return a generic HTTP 503 candidate-service response; tests verify private simulated error text is absent from responses and captured logs.
+- Retrieval opens and closes a dedicated session and materializes a detached response before the session closes.
+- No Alembic migration, database model change, candidate update/list/delete route, CV ingestion feature, or authentication-provider behavior is introduced.
+- Focused candidate/identity/health tests, the full default test suite, Ruff, `python tools/project_advisor.py check`, and `git diff --check` have been run and their actual outcomes are recorded. Any opt-in PostgreSQL tests are either passed against an isolated migrated database or explicitly reported as skipped because `PREPBUDDY_TEST_DATABASE_URL` was not configured.
+- `README.md` and `.ai/project-state.md` accurately distinguish this implemented retrieval endpoint from still-planned broader resource authorization and onboarding workflows.

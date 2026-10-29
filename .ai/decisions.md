@@ -1,5 +1,32 @@
 # Architectural decisions
 
+## Isolated PostgreSQL API validation — 2026-10-29
+
+Run local database validation with a uniquely named disposable PostgreSQL +
+pgvector container, generated credentials, loopback-only dynamic port, and
+temporary storage. Apply the real Alembic migrations and set both database URL
+variables only for child commands. Keep the development database and `.env`
+independent of this runner. See [automated testing](../docs/database.md#automated-postgresql-and-api-testing).
+
+The automated API flow uses real HTTP, production JWT validation, and committed
+PostgreSQL persistence for two generated users. Replace only the external JWKS
+transport with generated signing keys; real Auth0 browser login remains a separate
+integration check. This permits repeatable backend validation without storing user
+tokens or requiring interactive login. Tests clean up their generated rows and the
+runner removes its own container after completion or failure.
+
+## Current-candidate retrieval — 2026-10-29
+
+`GET /candidates/me` queries only by the authenticated local user's UUID and returns
+the existing candidate response or generic HTTP 404. Retrieve the owned row as
+stored, including retained soft-deleted candidates, consistent with the
+[retained-candidate ownership invariant](../docs/database.md#candidate-ownership).
+This endpoint does not introduce deletion/restoration behavior; that policy remains
+planned. The query adds no schema or migration change and follows the existing lazy
+session and sanitized HTTP error boundaries. See the
+[API contract](../README.md#backend-api) and
+[identity boundary](../docs/architecture.md#identity).
+
 ## Authenticated candidate creation — 2026-10-24
 
 Implement `POST /candidates` as a synchronous route behind `get_current_user`.

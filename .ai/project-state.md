@@ -1,6 +1,6 @@
 # Project state
 
-Last reviewed: 2026-10-24.
+Last reviewed: 2026-10-29.
 
 ## Present in the repository
 
@@ -34,21 +34,108 @@ Last reviewed: 2026-10-24.
   owner IDs/unknown fields are rejected. Only the exact ownership unique violation
   becomes a generic 409 after rollback; other persistence/configuration failures
   become generic 503. Synchronous persistence stays lazy. Tests: `tests/test_candidates.py`.
+- Authenticated current-candidate retrieval: `GET /candidates/me` in `app/main.py`
+  queries only by the authenticated local user's UUID. It returns the existing
+  detached response with HTTP 200, generic 404 for no candidate, and sanitized 503
+  for persistence/configuration failures. Retained soft-deleted rows remain
+  retrievable; deletion/restoration behavior is still planned. Tests:
+  `tests/test_candidate_retrieval.py`, including in-memory SQLite ownership isolation.
 - Local service configuration: `compose.yaml` and the Git-ignored `.env`.
 - Database credentials are required from environment configuration; Docker's
   PostgreSQL port is published only on host loopback. See `docs/database.md`.
+- Disposable PostgreSQL test runner: `tools/test_postgresql.py` and
+  `compose.test.yaml` provision an isolated pgvector database, apply migrations,
+  enable the PostgreSQL tests, and remove the test container/network afterward.
+- Automated backend HTTP flow: `tests/test_api_postgresql.py` runs a real Uvicorn
+  server with production JWT validation and committed PostgreSQL persistence.
+  Only the external JWKS transport is replaced with generated signing keys.
+  Two users exercise onboarding, retrieval, validation, and ownership isolation.
 
 ## Planned work
 
 The API skeleton and provider-neutral authentication boundary are implemented.
-Auth0 backend verification and authenticated candidate creation are implemented.
+Auth0 backend verification, authenticated candidate creation, and current-candidate
+retrieval are implemented.
 Live tenant configuration/testing, frontend login/session integration, candidate
-retrieval/listing, ownership queries for existing resources, CV ingestion, profile
+listing, ownership queries for other existing resources, CV ingestion, profile
 extraction, target-role selection, and resource authorization remain planned.
 Database readiness checks,
 broader backend configuration, the Next.js frontend, background processing, and
 preparation workflows also remain planned. Follow the
 implementation order in `docs/architecture.md` when selecting the next milestone.
+
+## PostgreSQL and API flow validation — 2026-10-29
+
+The user enabled Docker Desktop integration for this WSL distro. Docker is now
+available; sandbox access to its socket still requires execution outside the
+sandbox. Added a one-command runner with per-run generated credentials, a unique
+Compose project, loopback dynamic port, and temporary PostgreSQL storage. Child
+processes receive test-only database URLs; development `.env` and volumes remain
+unchanged. Contributor guidance now requests this runner for persistence/API work.
+
+Validation:
+
+- `.venv/bin/python tools/test_postgresql.py` passed outside the sandbox:
+  **142 passed, zero skipped**, with the two existing Starlette/AnyIO warnings.
+  A fresh PostgreSQL 16 + pgvector database successfully applied migrations
+  `20260830_0001` and `20261024_0002`. All previously skipped PostgreSQL checks ran.
+  Docker confirmed removal of the test container and its network after the run.
+- The new HTTP test verified missing/expired authentication, stable local-user
+  resolution, 404 before onboarding, rejected client ownership, 201 creation,
+  200 retrieval, 409 duplicate rejection, two-user isolation, and committed rows
+  visible from independent database sessions. It removed its generated rows.
+- `.venv/bin/python -m pytest -q tests/test_postgresql_runner.py`: 6 passed.
+  These tests cover test-only URL selection, cleanup after startup/migration/test
+  failures, cleanup failure reporting, secret redaction, and unavailable Docker.
+- `.venv/bin/ruff check app tests alembic tools`,
+  `.venv/bin/python tools/project_advisor.py`, advisor `next --dry-run`, and
+  `git diff --check` passed. The runner's six checks also passed after improving
+  the cleanup retry command; the database/API implementation was unchanged.
+
+This is an automated end-to-end test of the implemented backend with a substituted
+Auth0 signing-key transport. It does not perform a real Auth0 browser login or test
+a frontend. See [database testing](../docs/database.md#automated-postgresql-and-api-testing)
+for the repeatable command and existing isolated database configuration.
+
+## Current-candidate retrieval validation — 2026-10-29
+
+Implemented `GET /candidates/me` in `app/main.py` and `app/candidates/`. The service
+queries by authenticated ownership, raises `CandidateNotFound` for an absent row,
+and rolls back SQLAlchemy failures. The HTTP boundary lazily opens a dedicated
+session, materializes `CandidateResponse` before closure, and maps intentional
+absence to generic 404 and unexpected persistence/configuration errors to generic
+503. Authentication and identity resolution retain their existing 401/503 behavior.
+No models or migrations changed. Retained soft-deleted rows are retrievable; see
+the [retrieval decision](decisions.md#current-candidate-retrieval--2026-10-29).
+
+Validation using the existing Python 3.12 virtual environment:
+
+- `timeout 45s .venv/bin/python -m pytest -q tests/test_candidate_retrieval.py tests/test_candidates.py tests/test_identity.py tests/test_health.py`
+  timed out in the sandbox with no output, consistent with prior TestClient stalls.
+- `timeout 60s .venv/bin/python -m pytest -q tests/test_candidate_retrieval.py tests/test_candidates.py tests/test_identity.py tests/test_health.py`
+  passed outside the sandbox: 66 passed, 2 PostgreSQL tests skipped.
+- `timeout 60s .venv/bin/python -m pytest -q` passed outside the sandbox:
+  127 passed, 8 PostgreSQL tests skipped. Both successful test runs reported the
+  two existing Starlette/AnyIO deprecation warnings.
+- `.venv/bin/ruff check app tests alembic tools` passed after correcting three
+  lint findings in the new test file.
+- `.venv/bin/python tools/project_advisor.py`,
+  `.venv/bin/python tools/project_advisor.py check`,
+  `.venv/bin/python tools/project_advisor.py next --dry-run`, and
+  `git diff --check` passed.
+
+The 15 new retrieval checks cover serialized response fields, authenticated UUID
+propagation, ignored client-selected ownership, missing onboarding, authentication
+and identity failures, configuration/session/query/serialization error sanitization,
+rollback, and session closure. In-memory SQLite checks execute the real service
+query for two candidate owners and a third user without a candidate, including
+retained soft-deleted rows. The existing fresh-process health test still verifies
+database/provider import isolation.
+
+`PREPBUDDY_TEST_DATABASE_URL` was unset, so no live PostgreSQL or Auth0 validation
+was performed. README and architecture now reflect retrieval. The existing
+next-step brief is preserved and marked complete; advisor context was checked
+offline without an external plan-regeneration request.
 
 ## Candidate creation validation — 2026-10-24
 
